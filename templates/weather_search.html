@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Weather Semantic Search</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 24px;
+            background: #f5f7fb;
+            color: #1f2937;
+        }
+
+        .card {
+            background: white;
+            padding: 32px;
+            border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .subtitle {
+            color: #6b7280;
+        }
+
+        .search-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 12px 18px;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+
+        .result {
+            padding: 18px;
+            margin-top: 18px;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+
+        .score {
+            font-weight: 600;
+            color: #2563eb;
+        }
+
+        .headline {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .location {
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+
+        .text {
+            line-height: 1.6;
+        }
+
+        nav {
+            margin-bottom: 24px;
+        }
+
+        nav a {
+            margin-right: 16px;
+            text-decoration: none;
+            color: #2563eb;
+            font-weight: 600;
+        }
+
+    </style>
+</head>
+
+<body>
+
+<nav>
+    <a href="/">Sync Weather</a>
+    <a href="/search">Semantic Search</a>
+</nav>
+
+<div class="card">
+
+    <h1>Weather Semantic Search</h1>
+
+    <p class="subtitle">
+        Search weather forecasts and alerts using natural language.
+    </p>
+
+    <div class="search-row">
+
+        <input
+            id="query"
+            type="text"
+            value="flash flood risk this weekend"
+            placeholder="Enter a weather question..."
+        >
+
+        <button onclick="searchWeather()">
+            Search
+        </button>
+
+    </div>
+
+    <div id="status"></div>
+
+    <div id="results"></div>
+
+</div>
+
+<script>
+
+async function searchWeather() {
+
+    const query =
+        document.getElementById("query").value.trim();
+
+    const resultsDiv =
+        document.getElementById("results");
+
+    const statusDiv =
+        document.getElementById("status");
+
+    resultsDiv.innerHTML = "";
+
+    if (!query) {
+        statusDiv.textContent =
+            "Please enter a search query.";
+        return;
+    }
+
+    statusDiv.textContent =
+        "Searching...";
+
+    try {
+
+        const response = await fetch(
+            "/weather/search",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    query: query,
+                    top_k: 5
+                })
+            }
+        );
+
+        const data =
+            await response.json();
+
+        if (!response.ok) {
+            statusDiv.textContent =
+                data.error || "Search failed.";
+            return;
+        }
+
+        const results =
+            data.results || [];
+
+        statusDiv.textContent =
+            `Found ${results.length} results`;
+
+        results.forEach(result => {
+
+            const div =
+                document.createElement("div");
+
+            div.className =
+                "result";
+
+            const similarity =
+                Number(result.similarity).toFixed(3);
+
+            div.innerHTML = `
+                <div class="headline">
+                    ${escapeHtml(result.headline || "Weather Update")}
+                </div>
+
+                <div class="location">
+                    ${escapeHtml(result.location || "")}
+                    ·
+                    ${escapeHtml(result.source_type || "")}
+                </div>
+
+                <div class="score">
+                    Similarity: ${similarity}
+                </div>
+
+                <p class="text">
+                    ${escapeHtml(result.chunk_text || "")}
+                </p>
+            `;
+
+            resultsDiv.appendChild(div);
+        });
+
+    } catch (error) {
+
+        statusDiv.textContent =
+            "Search request failed: " + error;
+    }
+}
+
+
+function escapeHtml(value) {
+
+    const div =
+        document.createElement("div");
+
+    div.textContent =
+        value;
+
+    return div.innerHTML;
+}
+
+
+document
+    .getElementById("query")
+    .addEventListener(
+        "keydown",
+        function(event) {
+
+            if (event.key === "Enter") {
+                searchWeather();
+            }
+        }
+    );
+
+</script>
+
+</body>
+</html>

@@ -14,7 +14,6 @@ from contextlib import contextmanager
 import psycopg2
 from databricks.sdk import WorkspaceClient
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import create_engine
 
 _w = WorkspaceClient()
 
@@ -38,11 +37,6 @@ def get_connection():
         conn.close()
 
 
-def get_engine():
-    """Return a SQLAlchemy engine for Lakebase."""
-    return create_engine(_lakebase_url())
-
-
 def run_query(sql: str, params: tuple | dict | None = None) -> list[dict]:
     """Run a read query against Lakebase and return rows as list[dict]."""
     with get_connection() as conn:
@@ -58,3 +52,48 @@ def run_write(sql: str, params: tuple | dict | None = None) -> int:
             cur.execute(sql, params)
             conn.commit()
             return cur.rowcount
+
+
+def init_weather_tables():
+    """Create weather document and embedding tables if they do not exist."""
+
+    sql = """
+    CREATE EXTENSION IF NOT EXISTS vector;
+
+    CREATE TABLE IF NOT EXISTS weather_documents (
+        id TEXT PRIMARY KEY,
+        location TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        headline TEXT,
+        narrative_text TEXT NOT NULL,
+        issued_at TIMESTAMPTZ,
+        effective_at TIMESTAMPTZ,
+        payload JSONB,
+        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS weather_embeddings (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL
+            REFERENCES weather_documents(id)
+            ON DELETE CASCADE,
+        chunk_index INTEGER NOT NULL,
+        chunk_text TEXT NOT NULL,
+        embedding vector(384) NOT NULL,
+        model_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+        UNIQUE (document_id, chunk_index)
+    );
+
+    -- Skip vector index for now - ivfflat needs more data (1000+ vectors)
+    -- Will use sequential scan which is fine for small datasets
+    -- CREATE INDEX IF NOT EXISTS idx_weather_embeddings_vector
+    -- ON weather_embeddings USING ivfflat (embedding vector_cosine_ops)
+    -- WITH (lists = 100);
+    """
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            conn.commit()
