@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>News Vector Search</title>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --card-bg: #ffffff;
+      --border: #e4e7ee;
+      --text: #1f2430;
+      --muted: #6b7280;
+      --accent: #4f46e5;
+      --accent-hover: #4338ca;
+      --success: #16a34a;
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      max-width: 900px;
+      margin: 48px auto;
+      padding: 0 20px;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    .nav-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      display: inline-block;
+      margin-top: 8px;
+    }
+    .nav-link:hover { text-decoration: underline; }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-top: 24px;
+      box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      margin-top: 6px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 80px;
+      transition: border-color 0.15s ease;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    }
+
+    button {
+      margin-top: 18px;
+      padding: 10px 18px;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.15s ease;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    #status {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    #status.loading { display: block; background: #fef3c7; color: #92400e; }
+    #status.success { display: block; background: #dcfce7; color: #166534; }
+    #status.error { display: block; background: #fee2e2; color: #991b1b; }
+
+    .results-section {
+      margin-top: 32px;
+    }
+
+    .results-section h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .result-item {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 8px;
+    }
+
+    .result-title {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .similarity-score {
+      background: #e0e7ff;
+      color: #3730a3;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 12px;
+      white-space: nowrap;
+    }
+
+    .result-meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .result-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+      background: #fafbfe;
+      padding: 12px;
+      border-radius: 6px;
+      border-left: 3px solid var(--accent);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>📰 News Vector Search</h1>
+  <p class="hint">Search news articles and chunks using semantic similarity. Enter a query to find the most relevant content.</p>
+  <a href="/" class="nav-link">← Back to Watchlist</a>
+
+  <div class="card">
+    <form id="search-form">
+      <label for="query">Search query</label>
+      <textarea id="query" name="query" placeholder="e.g., What are analysts saying about AI chip demand?" required></textarea>
+      <button type="submit" id="search-btn">Search</button>
+    </form>
+
+    <div id="status"></div>
+  </div>
+
+  <div id="documents-section" class="results-section" style="display: none;">
+    <h2>📄 Top Documents</h2>
+    <div id="documents-results"></div>
+  </div>
+
+  <div id="chunks-section" class="results-section" style="display: none;">
+    <h2>📝 Top Chunks</h2>
+    <div id="chunks-results"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById("search-form");
+    const statusEl = document.getElementById("status");
+    const searchBtn = document.getElementById("search-btn");
+    const docsSection = document.getElementById("documents-section");
+    const chunksSection = document.getElementById("chunks-section");
+    const docsResults = document.getElementById("documents-results");
+    const chunksResults = document.getElementById("chunks-results");
+
+    function setStatus(type, message) {
+      statusEl.className = type;
+      statusEl.textContent = message;
+    }
+
+    function formatSimilarity(score) {
+      return (score * 100).toFixed(1) + "%";
+    }
+
+    function renderDocuments(docs) {
+      if (!docs || docs.length === 0) {
+        docsResults.innerHTML = '<div class="empty-state">No matching documents found.</div>';
+        return;
+      }
+
+      docsResults.innerHTML = docs.map(doc => `
+        <div class="result-item">
+          <div class="result-header">
+            <div class="result-title">${doc.title || "Untitled"}</div>
+            <div class="similarity-score">${formatSimilarity(doc.similarity)}</div>
+          </div>
+          <div class="result-meta">
+            <strong>Ticker:</strong> ${doc.ticker || "N/A"} • 
+            <strong>Published:</strong> ${doc.published_utc ? new Date(doc.published_utc).toLocaleString() : "N/A"}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderChunks(chunks) {
+      if (!chunks || chunks.length === 0) {
+        chunksResults.innerHTML = '<div class="empty-state">No matching chunks found.</div>';
+        return;
+      }
+
+      chunksResults.innerHTML = chunks.map(chunk => `
+        <div class="result-item">
+          <div class="result-header">
+            <div class="result-meta" style="margin-bottom: 0;">
+              <strong>Ticker:</strong> ${chunk.ticker || "N/A"} • 
+              <strong>Chunk:</strong> ${chunk.chunk_index + 1}
+            </div>
+            <div class="similarity-score">${formatSimilarity(chunk.similarity)}</div>
+          </div>
+          <div class="result-text">${chunk.chunk_text || "No text available"}</div>
+        </div>
+      `).join("");
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const query = document.getElementById("query").value.trim();
+      if (!query) return;
+
+      setStatus("loading", "Searching...");
+      searchBtn.disabled = true;
+      docsSection.style.display = "none";
+      chunksSection.style.display = "none";
+
+      try {
+        const resp = await fetch("/news/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, limit: 5, include_chunks: true }),
+        });
+        
+        const data = await resp.json();
+        
+        if (!resp.ok) {
+          setStatus("error", "Error: " + (data.error || resp.statusText));
+          searchBtn.disabled = false;
+          return;
+        }
+
+        setStatus("success", `Found ${data.documents?.length || 0} documents and ${data.chunks?.length || 0} chunks`);
+        
+        if (data.documents && data.documents.length > 0) {
+          docsSection.style.display = "block";
+          renderDocuments(data.documents);
+        }
+        
+        if (data.chunks && data.chunks.length > 0) {
+          chunksSection.style.display = "block";
+          renderChunks(data.chunks);
+        }
+        
+        if ((!data.documents || data.documents.length === 0) && (!data.chunks || data.chunks.length === 0)) {
+          setStatus("error", "No results found. Try a different query or make sure embeddings are generated.");
+        }
+        
+      } catch (err) {
+        setStatus("error", "Request failed: " + err.message);
+      } finally {
+        searchBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

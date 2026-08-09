@@ -8,7 +8,6 @@ Run locally:
     python app.py
 Deploy as a Databricks App using app.yaml.
 """
-
 import logging
 import os
 import re
@@ -26,9 +25,24 @@ logger = logging.getLogger("massive-app")
 app = Flask(__name__)
 _w = WorkspaceClient()
 
+# Cache for the embedding model - loaded lazily on first search
+_embedding_model = None
+
+def get_embedding_model():
+    """Lazy-load and cache the sentence transformer model."""
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        logger.info(f"Loading embedding model: {EMBEDDING_MODEL_NAME}")
+        _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    return _embedding_model
+
 TABLE_NAME = os.environ.get("MASSIVE_TABLE_NAME", "massive_records")
 WATCHLIST_TABLE_NAME = os.environ.get("WATCHLIST_TABLE_NAME", "watchlist")
 NEWS_TABLE_NAME = os.environ.get("NEWS_TABLE_NAME", "ticker_news_documents")
+NEWS_EMBEDDINGS_TABLE_NAME = "ticker_news_embeddings"
+CHUNK_EMBEDDINGS_TABLE_NAME = "ticker_news_chunk_embeddings"
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Tickers to fetch news for by default (comma-separated), e.g. "AAPL,MSFT,GOOGL"
 DEFAULT_NEWS_TICKERS = [
@@ -137,6 +151,12 @@ def handle_exception(err):
 def index():
     """Simple UI to submit a list of stock symbols to sync from Massive."""
     return render_template("index.html")
+
+
+@app.route("/search")
+def search_page():
+    """Vector search UI for news articles and chunks."""
+    return render_template("search.html")
 
 
 @app.route("/records")
@@ -284,6 +304,76 @@ def delete_from_watchlist(symbol: str):
         return jsonify({"error": f"{symbol} is not on your watchlist"}), 404
 
     return jsonify({"symbol": symbol, "email": email, "deleted": True})
+
+
+@app.route("/news/search", methods=["POST"])
+def search_news():
+    """
+    Semantic search over news articles and chunks using vector embeddings.
+    
+    Body (JSON): {"query": "your search text", "limit": 5, "include_chunks": true}
+    Returns top matching documents and optionally chunks based on cosine similarity.
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+    
+    query_text = request.json.get("query", "").strip()
+    if not query_text:
+        return jsonify({"error": "Query text is required"}), 400
+    
+    limit = int(request.json.get("limit", 5))
+    include_chunks = request.json.get("include_chunks", True)
+    
+    # Generate query embedding using cached model
+    try:
+        model = get_embedding_model()
+        query_embedding = model.encode(query_text)
+        query_vector_str = "[" + ",".join(map(str, query_embedding.tolist())) + "]"
+        
+    except Exception as e:
+        logger.exception("Failed to generate query embedding")
+        return jsonify({"error": f"Embedding generation failed: {str(e)}"}), 500
+    
+    # Search document-level embeddings
+    doc_results = lakebase.run_query(
+        f"""
+        SELECT 
+            e.id,
+            e.ticker,
+            e.title,
+            e.published_utc,
+            1 - (e.embedding <=> %s::vector) AS similarity
+        FROM {NEWS_EMBEDDINGS_TABLE_NAME} e
+        ORDER BY e.embedding <=> %s::vector
+        LIMIT %s
+        """,
+        (query_vector_str, query_vector_str, limit),
+    )
+    
+    chunk_results = []
+    if include_chunks:
+        # Search chunk-level embeddings
+        chunk_results = lakebase.run_query(
+            f"""
+            SELECT 
+                c.id,
+                c.article_id,
+                c.ticker,
+                c.chunk_index,
+                c.chunk_text,
+                1 - (c.embedding <=> %s::vector) AS similarity
+            FROM {CHUNK_EMBEDDINGS_TABLE_NAME} c
+            ORDER BY c.embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (query_vector_str, query_vector_str, limit),
+        )
+    
+    return jsonify({
+        "query": query_text,
+        "documents": doc_results,
+        "chunks": chunk_results if include_chunks else None
+    })
 
 
 def _extract_latest_price(data: dict) -> float | None:
